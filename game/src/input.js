@@ -1,53 +1,60 @@
-// Keyboard and pointer input. Held keys give a steering direction; one-shot presses (start or
-// restart, pause) are queued as bit flags and taken once by the loop, so a press between two
-// frames is never lost and never counted twice.
+// input.js — keyboard intent for the simulation. Held keys give continuous
+// intent (move, drive, run); one-shot presses (interact, pause, confirm) are
+// latched until the shell reads them, so a press between frames is never
+// lost and never counted twice.
 
-export const ACTION_CONFIRM = 1;
-export const ACTION_PAUSE = 2;
+const HELD = {
+  KeyW: 'up', ArrowUp: 'up',
+  KeyS: 'down', ArrowDown: 'down',
+  KeyA: 'left', ArrowLeft: 'left',
+  KeyD: 'right', ArrowRight: 'right',
+  ShiftLeft: 'run', ShiftRight: 'run',
+};
+const PRESSED = {
+  KeyE: 'interact', KeyF: 'interact',
+  Escape: 'pause', KeyP: 'pause',
+  Enter: 'confirm',
+};
 
-const LEFT = new Set(['ArrowLeft', 'KeyA']);
-const RIGHT = new Set(['ArrowRight', 'KeyD']);
-const CONFIRM = new Set(['Space', 'Enter']);
-const PAUSE = new Set(['KeyP', 'Escape']);
+export class Input {
+  constructor(target) {
+    this.held = { up: false, down: false, left: false, right: false, run: false };
+    this.latched = { interact: false, pause: false, confirm: false };
+    target.addEventListener('keydown', (e) => {
+      const h = HELD[e.code];
+      if (h) {
+        this.held[h] = true;
+        e.preventDefault();
+      }
+      const p = PRESSED[e.code];
+      if (p && !e.repeat) this.latched[p] = true;
+      if (p === 'pause' || p === 'confirm') e.preventDefault();
+    });
+    target.addEventListener('keyup', (e) => {
+      const h = HELD[e.code];
+      if (h) this.held[h] = false;
+    });
+    target.addEventListener('blur', () => {
+      for (const k of Object.keys(this.held)) this.held[k] = false;
+    });
+  }
 
-export function createInput(target) {
-  let left = false;
-  let right = false;
-  let actions = 0;
+  // The intent object the simulation steps on. `interact` is an edge: it is
+  // true for exactly one step after the press.
+  intent() {
+    return {
+      up: this.held.up,
+      down: this.held.down,
+      left: this.held.left,
+      right: this.held.right,
+      run: this.held.run,
+      interact: false,
+    };
+  }
 
-  window.addEventListener('keydown', (event) => {
-    if (LEFT.has(event.code)) left = true;
-    else if (RIGHT.has(event.code)) right = true;
-    else if (CONFIRM.has(event.code)) {
-      if (!event.repeat) actions |= ACTION_CONFIRM;
-    } else if (PAUSE.has(event.code)) {
-      if (!event.repeat) actions |= ACTION_PAUSE;
-    } else return;
-    event.preventDefault();
-  });
-  window.addEventListener('keyup', (event) => {
-    if (LEFT.has(event.code)) left = false;
-    else if (RIGHT.has(event.code)) right = false;
-  });
-  // A key released while the tab is hidden never sends keyup: let go of everything on blur.
-  window.addEventListener('blur', () => {
-    left = false;
-    right = false;
-  });
-  target.addEventListener('pointerdown', () => {
-    actions |= ACTION_CONFIRM;
-  });
-
-  return {
-    /** -1 for left, 1 for right, 0 for neither or both. */
-    direction() {
-      return (right ? 1 : 0) - (left ? 1 : 0);
-    },
-    /** The one-shot presses since the last call, as ACTION_* flags. */
-    takeActions() {
-      const taken = actions;
-      actions = 0;
-      return taken;
-    },
-  };
+  take(name) {
+    const v = this.latched[name];
+    this.latched[name] = false;
+    return v;
+  }
 }
